@@ -499,6 +499,10 @@ func (c *Client) ChatCompletions(ctx context.Context, token, chatID string, body
 		ContentType: "application/json",
 		IncludeAuth: true,
 	}
+	if stream, ok := body["stream"].(bool); ok && !stream {
+		accept = "application/json"
+		requestOptions.Accept = accept
+	}
 	if strings.TrimSpace(normalizeBearerToken(token)) == "" {
 		accept = "application/json"
 		requestOptions.Accept = accept

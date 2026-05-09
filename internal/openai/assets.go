@@ -2,7 +2,6 @@ package openai
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -30,10 +29,27 @@ type assetResult struct {
 	TaskID             string
 	TaskCandidates     []string
 	ResponseIDs        []string
+	SSEPayloads        []string
 	UpstreamError      *qwen.UpstreamError
 	RawPreview         string
 	RawBody            []byte
 	ChatDetailFallback bool
+}
+
+type assetParseError struct {
+	message string
+	result  assetResult
+}
+
+func (e *assetParseError) Error() string {
+	return e.message
+}
+
+func (e *assetParseError) Result() assetResult {
+	if e == nil {
+		return assetResult{}
+	}
+	return e.result
 }
 
 func parseAssetResult(raw []byte) assetResult {
@@ -52,6 +68,7 @@ func parseAssetResult(raw []byte) assetResult {
 	}
 
 	payloads, _ := parseSSEPayloads(text, true)
+	result.SSEPayloads = append(result.SSEPayloads, payloads...)
 	for _, payloadText := range payloads {
 		var payload any
 		if err := json.Unmarshal([]byte(payloadText), &payload); err == nil {
@@ -442,9 +459,9 @@ func resolveAssetURL(result assetResult, fallbackChatID string) (string, error) 
 		return result.ContentURL, nil
 	}
 	if fallbackChatID == "" {
-		return "", errors.New("未能从上游响应中解析资源链接")
+		return "", &assetParseError{message: "未能从上游响应中解析资源链接", result: result}
 	}
-	return "", errors.New("未能从上游响应或聊天详情中解析资源链接")
+	return "", &assetParseError{message: "未能从上游响应或聊天详情中解析资源链接", result: result}
 }
 
 func extractAssetFromChatDetail(chatDetail map[string]any, responseIDs []string) string {
@@ -491,8 +508,8 @@ func matchingChatMessages(chatDetail map[string]any, responseIDs []string) []any
 		if chat, ok := data["chat"].(map[string]any); ok {
 			if history, ok := chat["history"].(map[string]any); ok {
 				if messageMap, ok := history["messages"].(map[string]any); ok {
-					for _, message := range messageMap {
-						messages = append(messages, message)
+					for key, message := range messageMap {
+						messages = append(messages, messageWithMapKey(message, key))
 					}
 				}
 			}
@@ -511,16 +528,61 @@ func matchingChatMessages(chatDetail map[string]any, responseIDs []string) []any
 		if !ok {
 			continue
 		}
-		responseID := stringValue(obj["response_id"])
-		if responseID == "" {
-			responseID = stringValue(obj["responseId"])
-		}
-		if responseID == "" {
-			responseID = stringValue(obj["id"])
-		}
-		if _, ok := idSet[responseID]; ok {
+		if payloadContainsAnyID(obj, idSet) {
 			filtered = append(filtered, obj)
 		}
 	}
 	return filtered
+}
+
+func messageWithMapKey(message any, key string) any {
+	obj, ok := message.(map[string]any)
+	if !ok || strings.TrimSpace(key) == "" {
+		return message
+	}
+	if stringValue(obj["id"]) != "" || stringValue(obj["response_id"]) != "" || stringValue(obj["responseId"]) != "" {
+		return obj
+	}
+	cloned := make(map[string]any, len(obj)+1)
+	for itemKey, value := range obj {
+		cloned[itemKey] = value
+	}
+	cloned["id"] = key
+	return cloned
+}
+
+func payloadContainsAnyID(payload any, idSet map[string]struct{}) bool {
+	if len(idSet) == 0 {
+		return true
+	}
+	switch v := payload.(type) {
+	case nil:
+		return false
+	case string:
+		if _, ok := idSet[strings.TrimSpace(v)]; ok {
+			return true
+		}
+		var nested any
+		if json.Unmarshal([]byte(strings.TrimSpace(v)), &nested) == nil {
+			return payloadContainsAnyID(nested, idSet)
+		}
+	case []any:
+		for _, item := range v {
+			if payloadContainsAnyID(item, idSet) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, key := range []string{"id", "response_id", "responseId", "parent_id", "parentId"} {
+			if _, ok := idSet[stringValue(v[key])]; ok {
+				return true
+			}
+		}
+		for _, value := range v {
+			if payloadContainsAnyID(value, idSet) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -40,7 +40,7 @@ function getInitialTheme(): ThemeMode {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export function useAdminConsole() {
+export function useAdminConsole(initialTab?: TabKey) {
   const [apiKeyInput, setApiKeyInput] = useState(() => {
     if (typeof window === "undefined") {
       return "";
@@ -71,7 +71,7 @@ export function useAdminConsole() {
   const [addKeyValue, setAddKeyValue] = useState("");
   const [thresholdHours, setThresholdHours] = useState("24");
   const [savingSettings, setSavingSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab || "overview");
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") {

@@ -3,6 +3,8 @@ package openai
 import (
 	"encoding/json"
 	"testing"
+
+	"qwen2api/internal/storage"
 )
 
 func TestSplitModelSuffixSupportsFastAndThinkingVariants(t *testing.T) {
@@ -107,5 +109,39 @@ func TestChatRequestSupportsReasoningEffortAlias(t *testing.T) {
 	}
 	if got := resolveThinkingMode(payload.Model, payload.ReasoningEffort, payload.Reasoning.Effort, payload.EnableThinking); got != thinkingModeThinking {
 		t.Fatalf("resolveThinkingMode(decoded alias) = %q, want %q", got, thinkingModeThinking)
+	}
+}
+
+func TestBuildVideoRequestBodyMatchesQwenJSONTaskProtocol(t *testing.T) {
+	body := buildVideoRequestBody(storage.Account{Email: "user@example.com", Token: "token"}, "qwen3.6-plus", "chat-1", "t2v", []map[string]any{{
+		"role":           "user",
+		"content":        "生成视频",
+		"chat_type":      "t2v",
+		"feature_config": buildFeatureConfig(thinkingModeFast),
+	}})
+	applyAssetSize(body, "t2v", "16:9")
+
+	if body["stream"] != false {
+		t.Fatalf("stream = %v, want false", body["stream"])
+	}
+	if body["version"] != "2.1" {
+		t.Fatalf("version = %v, want 2.1", body["version"])
+	}
+	if body["chat_mode"] != "normal" {
+		t.Fatalf("chat_mode = %v, want normal", body["chat_mode"])
+	}
+
+	messages := body["messages"].([]map[string]any)
+	message := messages[0]
+	if message["sub_chat_type"] != "t2v" {
+		t.Fatalf("sub_chat_type = %v, want t2v", message["sub_chat_type"])
+	}
+	if message["size"] != "16:9" {
+		t.Fatalf("message size = %v, want 16:9", message["size"])
+	}
+	extra := message["extra"].(map[string]any)
+	meta := extra["meta"].(map[string]any)
+	if meta["subChatType"] != "t2v" || meta["size"] != "16:9" {
+		t.Fatalf("meta = %#v, want subChatType t2v and size 16:9", meta)
 	}
 }

@@ -519,6 +519,35 @@ func TestChatCompletionsUsesGuestHeadersWithoutToken(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsUsesJSONAcceptWhenStreamFalse(t *testing.T) {
+	client := NewClient(config.Config{QwenChatProxyURL: "https://chat.qwen.ai"}, logging.New(false))
+
+	var captured *http.Request
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			captured = req.Clone(req.Context())
+			return &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(strings.NewReader(`{"success":true}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	resp, err := client.ChatCompletions(context.Background(), "token-123", "chat-123", map[string]any{"stream": false})
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if captured == nil {
+		t.Fatal("expected request to be captured")
+	}
+	if got := captured.Header.Get("Accept"); got != "application/json" {
+		t.Fatalf("Accept = %q, want application/json", got)
+	}
+}
+
 func anyString(value any) string {
 	text, _ := value.(string)
 	return text

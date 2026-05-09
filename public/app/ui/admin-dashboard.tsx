@@ -7,6 +7,8 @@ import {
   Brain,
   Upload,
   Bug,
+  ImageIcon,
+  Video,
   Menu,
   Moon,
   Sun,
@@ -18,6 +20,7 @@ import {
 import { Input } from "@heroui/react";
 import { useAdminConsole } from "./hooks/use-admin-console";
 import { AccountsTab } from "./components/accounts-tab";
+import { AssetGenerationTab } from "./components/asset-generation-tab";
 import { DebugTab } from "./components/debug-tab";
 import { ModelsTab } from "./components/models-tab";
 import { OverviewTab } from "./components/overview-tab";
@@ -32,11 +35,13 @@ const NAV_ITEMS: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = 
   { key: "settings", label: "系统设置", icon: <Settings size={18} /> },
   { key: "models", label: "模型能力", icon: <Brain size={18} /> },
   { key: "uploads", label: "文件上传", icon: <Upload size={18} /> },
+  { key: "images", label: "AI 生图", icon: <ImageIcon size={18} /> },
+  { key: "videos", label: "AI 生视频", icon: <Video size={18} /> },
   { key: "debug", label: "接口调试", icon: <Bug size={18} /> },
 ];
 
-export function AdminDashboard() {
-  const { state, actions } = useAdminConsole();
+export function AdminDashboard({ initialTab }: { initialTab?: TabKey } = {}) {
+  const { state, actions } = useAdminConsole(initialTab);
 
   if (!state.verified) {
     return (
@@ -243,6 +248,8 @@ export function AdminDashboard() {
           ) : null}
 
           {state.activeTab === "uploads" ? <UploadsTab apiKey={state.apiKey} /> : null}
+          {state.activeTab === "images" ? <AssetGenerationTab kind="image" apiKey={state.apiKey} /> : null}
+          {state.activeTab === "videos" ? <AssetGenerationTab kind="video" apiKey={state.apiKey} /> : null}
           {state.activeTab === "debug" ? <DebugTab apiKey={state.apiKey} models={state.filteredModels} /> : null}
         </main>
       </div>

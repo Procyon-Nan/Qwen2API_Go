@@ -444,6 +444,9 @@ func cloneMessageList(messages []map[string]any) []map[string]any {
 }
 
 func buildChatRequestBody(session storage.Account, model, chatID, chatType string, messages []map[string]any) map[string]any {
+	if chatType == "t2v" {
+		return buildVideoRequestBody(session, model, chatID, chatType, messages)
+	}
 	if session.IsGuest() {
 		return buildGuestChatRequestBody(model, chatID, chatType, messages)
 	}
@@ -458,6 +461,24 @@ func buildChatRequestBody(session storage.Account, model, chatID, chatType strin
 		"id":                 fmt.Sprintf("%d", time.Now().UnixNano()),
 		"sub_chat_type":      chatType,
 		"chat_mode":          "normal",
+	}
+}
+
+func buildVideoRequestBody(session storage.Account, model, chatID, chatType string, messages []map[string]any) map[string]any {
+	chatMode := "normal"
+	if session.IsGuest() {
+		chatMode = "guest"
+	}
+	return map[string]any{
+		"stream":             false,
+		"version":            "2.1",
+		"incremental_output": true,
+		"chat_id":            chatID,
+		"chat_mode":          chatMode,
+		"model":              model,
+		"parent_id":          nil,
+		"messages":           decorateAssetMessages(model, chatType, messages),
+		"timestamp":          time.Now().Unix(),
 	}
 }
 
@@ -527,6 +548,42 @@ func decorateGuestMessages(model, chatType string, messages []map[string]any) []
 	return decorated
 }
 
+func decorateAssetMessages(model, chatType string, messages []map[string]any) []map[string]any {
+	decorated := make([]map[string]any, 0, len(messages))
+	messageTimestamp := time.Now().Unix()
+	for _, message := range messages {
+		item := cloneMap(message)
+		if _, ok := item["fid"]; !ok || strings.TrimSpace(fmt.Sprint(item["fid"])) == "" || fmt.Sprint(item["fid"]) == "<nil>" {
+			item["fid"] = fmt.Sprintf("%d", time.Now().UnixNano())
+		}
+		if _, ok := item["parentId"]; !ok {
+			item["parentId"] = nil
+		}
+		if _, ok := item["childrenIds"]; !ok {
+			item["childrenIds"] = []string{}
+		}
+		if _, ok := item["user_action"]; !ok || strings.TrimSpace(fmt.Sprint(item["user_action"])) == "" || fmt.Sprint(item["user_action"]) == "<nil>" {
+			item["user_action"] = "chat"
+		}
+		if _, ok := item["files"]; !ok {
+			item["files"] = []any{}
+		}
+		if _, ok := item["timestamp"]; !ok {
+			item["timestamp"] = messageTimestamp
+		}
+		if _, ok := item["models"]; !ok {
+			item["models"] = []string{model}
+		}
+		item["chat_type"] = chatType
+		item["sub_chat_type"] = chatType
+		if _, ok := item["parent_id"]; !ok {
+			item["parent_id"] = nil
+		}
+		decorated = append(decorated, item)
+	}
+	return decorated
+}
+
 func normalizeGuestFeatureConfig(featureConfig map[string]any) map[string]any {
 	if featureConfig == nil {
 		featureConfig = map[string]any{}
@@ -539,6 +596,29 @@ func normalizeGuestFeatureConfig(featureConfig map[string]any) map[string]any {
 	featureConfig["thinking_format"] = "summary"
 	featureConfig["auto_search"] = true
 	return featureConfig
+}
+
+func applyAssetSize(body map[string]any, chatType string, size string) {
+	size = strings.TrimSpace(size)
+	if body == nil || chatType != "t2v" || size == "" {
+		return
+	}
+	messages, _ := body["messages"].([]map[string]any)
+	for _, message := range messages {
+		message["size"] = size
+		extra, _ := message["extra"].(map[string]any)
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		meta, _ := extra["meta"].(map[string]any)
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["subChatType"] = chatType
+		meta["size"] = size
+		extra["meta"] = meta
+		message["extra"] = extra
+	}
 }
 
 func detectMediaURL(item map[string]any) (field string, url string) {
@@ -773,6 +853,9 @@ func buildModelVariant(model qwen.Model, suffix string) map[string]any {
 	variantDisplayName := displayName + suffix
 	return map[string]any{
 		"id":           variantDisplayName,
+		"object":       "model",
+		"created":      0,
+		"owned_by":     "qwen",
 		"name":         model.ID + suffix,
 		"upstream_id":  model.ID,
 		"display_name": variantDisplayName,
@@ -1471,7 +1554,7 @@ func (h *Handler) HandleImagesGeneration(w http.ResponseWriter, r *http.Request)
 		"content": payload.Prompt,
 	}})
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": err.Error()}})
+		writeJSON(w, http.StatusBadGateway, assetErrorPayload(err))
 		return
 	}
 
@@ -1515,7 +1598,7 @@ func (h *Handler) HandleImagesEdit(w http.ResponseWriter, r *http.Request) {
 		"content": parts,
 	}})
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": err.Error()}})
+		writeJSON(w, http.StatusBadGateway, assetErrorPayload(err))
 		return
 	}
 	item := map[string]any{"url": url}
@@ -1528,6 +1611,27 @@ func (h *Handler) HandleImagesEdit(w http.ResponseWriter, r *http.Request) {
 		"created": time.Now().Unix(),
 		"data":    []map[string]any{item},
 	})
+}
+
+func assetErrorPayload(err error) map[string]any {
+	payload := map[string]any{
+		"error": map[string]any{"message": err.Error()},
+	}
+
+	var parseErr *assetParseError
+	if errors.As(err, &parseErr) {
+		result := parseErr.Result()
+		payload["debug"] = map[string]any{
+			"rawText":        string(result.RawBody),
+			"rawPreview":     result.RawPreview,
+			"ssePayloads":    result.SSEPayloads,
+			"responseIds":    result.ResponseIDs,
+			"taskId":         result.TaskID,
+			"taskCandidates": result.TaskCandidates,
+		}
+	}
+
+	return payload
 }
 
 func collectMultipartFiles(form *multipart.Form) []string {
@@ -1578,7 +1682,7 @@ func (h *Handler) HandleVideos(w http.ResponseWriter, r *http.Request) {
 		"content": payload.Prompt,
 	}})
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": err.Error()}})
+		writeJSON(w, http.StatusBadGateway, assetErrorPayload(err))
 		return
 	}
 
@@ -1617,6 +1721,7 @@ func (h *Handler) generateAssetWithSession(ctx context.Context, requestedModel, 
 	body := buildChatRequestBody(session, model, chatID, chatType, normalizedMessages)
 	if size != "" {
 		body["size"] = size
+		applyAssetSize(body, chatType, size)
 	}
 	resp, err := h.qwen.ChatCompletions(ctx, session.Token, chatID, body)
 	if err != nil {
@@ -1672,7 +1777,7 @@ func (h *Handler) generateAssetWithSession(ctx context.Context, requestedModel, 
 	if chatType == "t2v" && len(result.TaskCandidates) > 0 {
 		return h.pollVideo(ctx, session.Token, result.TaskCandidates)
 	}
-	return "", errors.New("未能从上游响应中解析资源链接")
+	return "", &assetParseError{message: "未能从上游响应中解析资源链接", result: result}
 }
 
 func (h *Handler) pollVideo(ctx context.Context, token string, taskCandidates []string) (string, error) {

@@ -18,9 +18,9 @@ func TestParseAssetResultScenarios(t *testing.T) {
 			wantResponseID: "resp_1",
 		},
 		{
-			name:           "download link text",
-			input:          `[Download Video](https://cdn.example.com/a.mp4)`,
-			wantURL:        "https://cdn.example.com/a.mp4",
+			name:    "download link text",
+			input:   `[Download Video](https://cdn.example.com/a.mp4)`,
+			wantURL: "https://cdn.example.com/a.mp4",
 		},
 		{
 			name:           "nested payload url and task id",
@@ -28,6 +28,16 @@ func TestParseAssetResultScenarios(t *testing.T) {
 			wantURL:        "https://cdn.example.com/b.png",
 			wantTaskID:     "task-123",
 			wantResponseID: "resp_nested",
+		},
+		{
+			name:       "video json response with wanx task id",
+			input:      `{"success":true,"data":{"messages":[{"role":"assistant","chat_type":"t2v","extra":{"wanx":{"task_id":"task-video-1"}}}]}}`,
+			wantTaskID: "task-video-1",
+		},
+		{
+			name:    "video status success content url",
+			input:   `{"chat_type":"t2v","task_status":"success","content":"https://cdn.example.com/video.mp4?key=abc"}`,
+			wantURL: "https://cdn.example.com/video.mp4?key=abc",
 		},
 		{
 			name:           "sse payload extraction",
@@ -65,6 +75,40 @@ func TestParseAssetResultScenarios(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseAssetResultKeepsSSEPayloads(t *testing.T) {
+	input := "data: {\"choices\":[{\"delta\":{\"content\":\"生成中\"}}]}\n\n" +
+		"data: {\"response_id\":\"resp_1\",\"task_id\":\"task_1\"}\n\n"
+
+	result := parseAssetResult([]byte(input))
+	if len(result.SSEPayloads) != 2 {
+		t.Fatalf("SSEPayloads = %#v, want 2 payloads", result.SSEPayloads)
+	}
+	if result.SSEPayloads[0] != `{"choices":[{"delta":{"content":"生成中"}}]}` {
+		t.Fatalf("first SSE payload = %q", result.SSEPayloads[0])
+	}
+	if result.TaskID != "task_1" {
+		t.Fatalf("TaskID = %q, want task_1", result.TaskID)
+	}
+}
+
+func TestAssetErrorPayloadIncludesRawSSEDebug(t *testing.T) {
+	raw := []byte("data: {\"response_id\":\"resp_1\"}\n\n")
+	result := parseAssetResult(raw)
+	payload := assetErrorPayload(&assetParseError{message: "未能从上游响应中解析资源链接", result: result})
+
+	debug, ok := payload["debug"].(map[string]any)
+	if !ok {
+		t.Fatalf("debug missing in payload: %#v", payload)
+	}
+	if debug["rawText"] != string(raw) {
+		t.Fatalf("rawText = %q, want %q", debug["rawText"], string(raw))
+	}
+	payloads, ok := debug["ssePayloads"].([]string)
+	if !ok || len(payloads) != 1 || payloads[0] != `{"response_id":"resp_1"}` {
+		t.Fatalf("ssePayloads = %#v", debug["ssePayloads"])
 	}
 }
 
