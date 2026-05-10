@@ -29,6 +29,18 @@ type Config struct {
 	QwenChatProxyURL      string
 	ProxyURL              string
 	ChatCleanupMode       int
+	LingmaBackend         string
+	LingmaModel           string
+	LingmaRemoteBaseURL   string
+	LingmaRemoteAuthFile  string
+	LingmaRemoteVersion   string
+	LingmaTimeoutSeconds  int
+	LingmaFallback        bool
+	LingmaFallbackModels  []string
+	LingmaTransport       string
+	LingmaPipe            string
+	LingmaWebSocketURL    string
+	LingmaSessionMode     string
 }
 
 func Load() Config {
@@ -61,6 +73,18 @@ func Load() Config {
 		QwenChatProxyURL:      getEnv("QWEN_CHAT_PROXY_URL", "https://chat.qwen.ai"),
 		ProxyURL:              os.Getenv("PROXY_URL"),
 		ChatCleanupMode:       getEnvInt("CHAT_CLEANUP_MODE", 0),
+		LingmaBackend:         getEnv("LINGMA_BACKEND", "remote"),
+		LingmaModel:           getEnv("LINGMA_MODEL", "kmodel"),
+		LingmaRemoteBaseURL:   os.Getenv("LINGMA_REMOTE_BASE_URL"),
+		LingmaRemoteAuthFile:  os.Getenv("LINGMA_REMOTE_AUTH_FILE"),
+		LingmaRemoteVersion:   os.Getenv("LINGMA_REMOTE_VERSION"),
+		LingmaTimeoutSeconds:  getEnvInt("LINGMA_TIMEOUT_SECONDS", 0),
+		LingmaFallback:        getEnvBool("LINGMA_REMOTE_FALLBACK_ENABLED", true),
+		LingmaFallbackModels:  parseCSV(os.Getenv("LINGMA_REMOTE_FALLBACK_MODELS")),
+		LingmaTransport:       getEnv("LINGMA_TRANSPORT", "auto"),
+		LingmaPipe:            os.Getenv("LINGMA_PIPE"),
+		LingmaWebSocketURL:    os.Getenv("LINGMA_WEBSOCKET_URL"),
+		LingmaSessionMode:     getEnv("LINGMA_SESSION_MODE", "auto"),
 	}
 }
 
@@ -72,6 +96,10 @@ func (c Config) ListenAddressOrDefault() string {
 }
 
 func parseAPIKeys(raw string) []string {
+	return parseCSV(raw)
+}
+
+func parseCSV(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
 		return []string{}
 	}

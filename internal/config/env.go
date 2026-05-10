@@ -31,6 +31,20 @@ SERVICE_PORT=3000
 # Upstream endpoint
 QWEN_CHAT_PROXY_URL=https://chat.qwen.ai
 
+# Lingma built-in provider
+LINGMA_BACKEND=remote
+LINGMA_MODEL=kmodel
+LINGMA_REMOTE_BASE_URL=
+LINGMA_REMOTE_AUTH_FILE=
+LINGMA_REMOTE_VERSION=
+LINGMA_TIMEOUT_SECONDS=0
+LINGMA_REMOTE_FALLBACK_ENABLED=true
+LINGMA_REMOTE_FALLBACK_MODELS=kmodel,mmodel,dashscope_qwen3_coder,dashscope_qmodel,dashscope_qwen_max_latest,dashscope_qwen_plus_20250428_thinking
+LINGMA_TRANSPORT=auto
+LINGMA_PIPE=
+LINGMA_WEBSOCKET_URL=
+LINGMA_SESSION_MODE=auto
+
 # Optional outbound proxy
 # PROXY_URL=http://127.0.0.1:7890
 PROXY_URL=

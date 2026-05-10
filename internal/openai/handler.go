@@ -18,6 +18,7 @@ import (
 
 	"qwen2api/internal/account"
 	"qwen2api/internal/config"
+	lingmaservice "qwen2api/internal/lingma/service"
 	"qwen2api/internal/logging"
 	"qwen2api/internal/metrics"
 	"qwen2api/internal/qwen"
@@ -31,6 +32,7 @@ type Handler struct {
 	cfg         config.Config
 	runtime     *config.Runtime
 	qwen        *qwen.Client
+	lingma      *lingmaservice.Service
 	accounts    *account.Service
 	sessions    *ConversationSessionService
 	chatTracker storage.ChatTracker
@@ -38,11 +40,12 @@ type Handler struct {
 	logger      *logging.Logger
 }
 
-func NewHandler(cfg config.Config, runtime *config.Runtime, qwenClient *qwen.Client, accounts *account.Service, sessions *ConversationSessionService, chatTracker storage.ChatTracker, stats *metrics.DashboardStats, logger *logging.Logger) *Handler {
+func NewHandler(cfg config.Config, runtime *config.Runtime, qwenClient *qwen.Client, lingmaService *lingmaservice.Service, accounts *account.Service, sessions *ConversationSessionService, chatTracker storage.ChatTracker, stats *metrics.DashboardStats, logger *logging.Logger) *Handler {
 	return &Handler{
 		cfg:         cfg,
 		runtime:     runtime,
 		qwen:        qwenClient,
+		lingma:      lingmaService,
 		accounts:    accounts,
 		sessions:    sessions,
 		chatTracker: chatTracker,
@@ -781,16 +784,22 @@ func convertContent(content any) any {
 }
 
 type chatRequest struct {
-	Model           string           `json:"model"`
-	Messages        []map[string]any `json:"messages"`
-	Stream          bool             `json:"stream"`
-	EnableThinking  any              `json:"enable_thinking"`
-	ReasoningEffort any              `json:"reasoning_effort"`
-	Reasoning       *chatReasoning   `json:"reasoning"`
-	ThinkingBudget  any              `json:"thinking_budget"`
-	Tools           any              `json:"tools"`
-	ToolChoice      any              `json:"tool_choice"`
-	Size            string           `json:"size"`
+	Model               string           `json:"model"`
+	Messages            []map[string]any `json:"messages"`
+	Stream              bool             `json:"stream"`
+	MaxTokens           int              `json:"max_tokens"`
+	MaxCompletionTokens int              `json:"max_completion_tokens"`
+	Temperature         *float64         `json:"temperature"`
+	TopP                *float64         `json:"top_p"`
+	Stop                any              `json:"stop"`
+	EnableThinking      any              `json:"enable_thinking"`
+	ReasoningEffort     any              `json:"reasoning_effort"`
+	Reasoning           *chatReasoning   `json:"reasoning"`
+	ThinkingBudget      any              `json:"thinking_budget"`
+	Tools               any              `json:"tools"`
+	ToolChoice          any              `json:"tool_choice"`
+	ParallelToolCalls   *bool            `json:"parallel_tool_calls"`
+	Size                string           `json:"size"`
 }
 
 func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
@@ -842,6 +851,7 @@ func (h *Handler) ListModelVariants(ctx context.Context) ([]map[string]any, erro
 			result = append(result, buildModelVariant(model, "-image-edit"))
 		}
 	}
+	result = append(result, h.listLingmaModelVariants(ctx)...)
 	return result, nil
 }
 
@@ -869,6 +879,10 @@ func (h *Handler) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	estimatedPromptTokens := estimateOpenAIInputTokens(payload.Messages, payload.Tools, payload.ToolChoice)
+	if _, ok := splitLingmaModel(payload.Model); ok {
+		h.handleLingmaChatCompletion(w, r, payload, estimatedPromptTokens)
+		return
+	}
 	if shouldReplyHi(payload) {
 		h.writeHiResponse(w, payload.Model, payload.Stream, estimatedPromptTokens)
 		return
